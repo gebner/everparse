@@ -20,8 +20,13 @@ module U32 = FStar.UInt32
 module U64 = FStar.UInt64
 module A = EverParse3d.Actions.All
 module P = EverParse3d.Prelude
+module S = EverParse3d.Serializer
 module T = FStar.Tactics
 module CP = EverParse3d.CopyBuffer
+module R = Pulse.Lib.Reference
+open Pulse.Lib.Pervasives
+module PA = Pulse.Lib.Array
+module SZ = FStar.SizeT
 open FStar.List.Tot
 
 inline_for_extraction
@@ -265,6 +270,11 @@ let disjoint (e1 e2:loc_index)
     | _, Trivial -> disj_none
     | NonTrivial e1, NonTrivial e2 -> NonTrivial (A.disjoint e1 e2)
 
+let pulse_ref_match_value (#t #pt: Type0) (mv : t -> pt -> vprop) (h : erased t) (l : (R.ref pt * erased t)) =
+  pure (l._2 == h) ** (exists* v. R.pts_to l._1 v ** mv h v)
+
+let gb_pulse_ser_t (t pt: Type0) #nz #wk #k (p: P.parser #nz #wk k t) (mv : t -> pt -> vprop) =
+  (h : erased t) -> (l : (R.ref pt * erased t)) -> P.pulse_ser_t p h (pulse_ref_match_value mv h l)
 
 (* A context is a list of bindings, where each binding is a pair of a
    name and a denotation of the name. *)
@@ -274,7 +284,7 @@ let disjoint (e1 e2:loc_index)
    quadruple of {type, parser, validator, opt reader} 
 *)
 noeq
-type global_binding = {
+type global_binding : Type u#2 = {
   //Parser metadata
   parser_kind_nz:bool; // Does it consume non-zero bytes?
   parser_weak_kind: P.weak_kind;
@@ -298,6 +308,12 @@ type global_binding = {
           (interp_disj disj)
           (interp_loc loc)
           (Some? p_reader);
+  // Pulse type
+  p_pt : Type0;
+  // Pulse matching
+  p_mv : p_t -> p_pt -> vprop;
+  // Pulse serializer
+  p_ser : gb_pulse_ser_t p_t p_pt p_p p_mv;
 }
 
 let projector_names : list string = [
@@ -311,6 +327,9 @@ let projector_names : list string = [
   `%Mkglobal_binding?.p_p;
   `%Mkglobal_binding?.p_reader;
   `%Mkglobal_binding?.p_v;
+  `%Mkglobal_binding?.p_pt;
+  `%Mkglobal_binding?.p_mv;
+  `%Mkglobal_binding?.p_ser;
 ]
 
 let nz_of_binding = Mkglobal_binding?.parser_kind_nz
@@ -323,6 +342,10 @@ let type_of_binding = Mkglobal_binding?.p_t
 let parser_of_binding = Mkglobal_binding?.p_p
 let leaf_reader_of_binding = Mkglobal_binding?.p_reader
 let validator_of_binding = Mkglobal_binding?.p_v
+let pulse_type_of_binding = Mkglobal_binding?.p_pt
+let pulse_match_value_of_binding = Mkglobal_binding?.p_mv
+noextract inline_for_extraction
+let pulse_ser_of_binding = Mkglobal_binding?.p_ser
 
 let has_reader (g:global_binding) = 
   match leaf_reader_of_binding g with
@@ -475,6 +498,32 @@ let dtyp_as_leaf_reader #nz (#pk:P.parser_kind nz P.WeakKindStrongPrefix)
       let (| _, lr |) = get_leaf_reader b in
       lr
 
+[@@specialize]
+let itype_as_pulse_type (i:itype)
+  : Type
+  = match i with
+    | UInt8 -> P.___UINT8
+    | UInt16 -> P.___UINT16
+    | UInt32 -> P.___UINT32
+    | UInt64 -> P.___UINT64
+    | UInt8BE -> P.___UINT8BE
+    | UInt16BE -> P.___UINT16BE
+    | UInt32BE -> P.___UINT32BE
+    | UInt64BE -> P.___UINT64BE
+    | Unit -> unit
+    | AllBytes -> admit () // TODO
+    | AllZeros -> admit () // TODO
+
+let dtyp_as_pulse_type #nz #wk (#pk:P.parser_kind nz wk) #hr #i #disj #l
+                 (d:dtyp pk hr i disj l)
+  : Type
+  = match d with
+    | DT_IType i -> 
+      itype_as_pulse_type i
+
+    | DT_App _ _ _ _ _ b _ ->
+      R.ref (pulse_type_of_binding b) * erased (type_of_binding b)
+
 (** Actions *)
 
 let action_binding
@@ -522,7 +571,7 @@ let mk_action_binding
 *)
 noeq
 type atomic_action
-  : inv_index -> disj_index -> loc_index -> bool -> Type0 -> Type u#1 =
+  : inv_index -> disj_index -> loc_index -> bool -> Type0 -> Type u#2 =
   | Action_return:
       #a:Type0 ->
       x:a ->
@@ -632,7 +681,7 @@ let atomic_action_as_action
 *)
 noeq
 type action
-  : inv_index -> disj_index -> loc_index -> bool -> Type0 -> Type u#1 =
+  : inv_index -> disj_index -> loc_index -> bool -> Type0 -> Type u#2 =
   | Atomic_action:
       #i:_ -> #d:_ -> #l:_ -> #b:_ -> #t:_ ->
       atomic_action i d l b t ->
@@ -1115,6 +1164,179 @@ let rec as_reader #nz (#pk:P.parser_kind nz P.WeakKindStrongPrefix)
       assert_norm (as_parser (T_false _n) == P.parse_impos());
       (| (), A.read_impos |)
 
+let itype_high_of_pulse (i:itype) (l: itype_as_pulse_type i) : GTot (itype_as_type i) =
+  match i with
+  | UInt8 -> l
+  | UInt16 -> l
+  | UInt32 -> l
+  | UInt64 -> l
+  | UInt8BE -> l
+  | UInt16BE -> l
+  | UInt32BE -> l
+  | UInt64BE -> l
+  | Unit -> ()
+  | AllBytes -> admit ()
+  | AllZeros -> admit ()
+
+let dtyp_high_of_pulse #nz #wk (#pk:P.parser_kind nz wk) #hr #i #disj #l' (d:dtyp pk hr i disj l')
+    (l: dtyp_as_pulse_type d) : GTot (dtyp_as_type d) =
+  match d with
+  | DT_IType i -> itype_high_of_pulse i l
+
+  | DT_App _ _ _ _ _ b _ ->
+    let l: R.ref (pulse_type_of_binding b) * erased (dtyp_as_type d) = l in
+    l._2
+
+let dtyp_as_pulse_type_refined #nz #wk (#pk:P.parser_kind nz wk) #hr #i #disj #l
+    (d:dtyp pk hr i disj l) (f : dtyp_as_type d -> bool) : Type =
+  x:dtyp_as_pulse_type d { f (dtyp_high_of_pulse d x) }
+
+let rec as_pulse_type #nz #wk (#pk:P.parser_kind nz wk) #l #i #d #b (t:typ pk l i d b) : Tot Type0 (decreases t) =
+  match t with
+  | T_false _ -> False
+  | T_denoted _ td -> dtyp_as_pulse_type td
+
+  | T_pair _ t1 t2 ->
+    as_pulse_type t1 & as_pulse_type t2
+
+  | T_dep_pair _ i t
+  | T_dep_pair_with_action _ i t _ ->
+    x:dtyp_as_pulse_type i & as_pulse_type (t (dtyp_high_of_pulse i x))
+
+  | T_refine _ base refinement
+  | T_refine_with_action _ base refinement _ ->
+    dtyp_as_pulse_type_refined base refinement
+
+  | T_dep_pair_with_refinement _ base refinement t
+  | T_dep_pair_with_refinement_and_action _ base refinement t _ ->
+    x:dtyp_as_pulse_type_refined base refinement & as_pulse_type (t (dtyp_high_of_pulse base x))
+
+  // TODO: this most likely doesn't extract
+  | T_if_else b t0 t1 -> if b then as_type (t0 ()) else as_type (t1 ())
+  | T_cases b t0 t1 -> if b then as_type t0 else as_type t1
+
+  | T_with_action _ t _
+  | T_with_comment _ t _ ->
+    as_pulse_type t
+
+  | T_with_dep_action _ i _ ->
+    dtyp_as_pulse_type i
+
+  | T_nlist _ n t ->
+    len:SZ.t & PA.larray (as_pulse_type t) (SZ.v len)
+
+  | T_at_most _ n t ->
+    len:SZ.t & PA.larray (as_pulse_type t) (SZ.v len)
+
+  | T_exact _ n t ->
+    len:SZ.t { SZ.v len == U32.v n } & PA.larray (as_pulse_type t) (SZ.v len)
+
+  | T_string _ elt_t terminator ->
+    admit () // TODO
+    // P.cstring (dtyp_as_type elt_t) terminator
+
+let dtyp_pulse_match_value #nz #wk (#pk:P.parser_kind nz wk) #hr #i #disj #l' (d:dtyp pk hr i disj l') (h:dtyp_as_type d) (l:dtyp_as_pulse_type d) : Tot vprop =
+  match d with
+  | DT_IType i -> pure (itype_high_of_pulse i l == h)
+  | DT_App _ _ _ _ _ b _ -> pulse_ref_match_value (pulse_match_value_of_binding b) h l
+
+let rec pulse_match_value #nz #wk (#pk:P.parser_kind nz wk) #l' #i #d #b (t:typ pk l' i d b) : Tot (as_type t -> as_pulse_type t -> vprop) (decreases t) =
+  match t returns Tot (as_type t -> as_pulse_type t -> vprop) with
+  | T_false _ -> fun (h: False) l -> pure True
+  | T_denoted _ td -> fun (h: dtyp_as_type td) (l : dtyp_as_pulse_type td) -> dtyp_pulse_match_value td h l
+
+  | T_pair _ t1 t2 -> fun (h : _ & _) (l : _ & _) ->
+    pulse_match_value t1 h._1 l._1 ** pulse_match_value t2 h._2 l._2
+
+  | T_dep_pair _ i t
+  | T_dep_pair_with_action _ i t _ ->
+    fun (h: (x:dtyp_as_type i & as_type (t x))) (l: (x:dtyp_as_pulse_type i & as_pulse_type (t (dtyp_high_of_pulse i x)))) ->
+    dtyp_pulse_match_value _ h._1 l._1 **
+    (exists* (heq : dtyp_high_of_pulse i l._1 == h._1).
+    pulse_match_value (t h._1) h._2 (coerce () l._2))
+  
+  | T_refine _ base refinement
+  | T_refine_with_action _ base refinement _ -> fun (h: P.refine (dtyp_as_type base) refinement) (l: dtyp_as_pulse_type_refined base refinement) ->
+    dtyp_pulse_match_value base h l
+
+  | _ -> admit ()
+
+let itype_pulse_serialize_t (i:itype) =
+  x:itype_as_pulse_type i ->
+    P.pulse_ser_t (itype_as_parser i) (itype_high_of_pulse i x) emp
+
+inline_for_extraction noextract
+let itype_pulse_serialize (i:itype) : itype_pulse_serialize_t i =
+  match i returns itype_pulse_serialize_t i with
+  | UInt8 -> P.pulse_ser_u8
+  | UInt16 -> P.pulse_ser_u16le
+  | UInt32 -> P.pulse_ser_u32le
+  | UInt64 -> P.pulse_ser_u64le
+  | UInt8BE -> P.pulse_ser_u8be
+  | UInt16BE -> P.pulse_ser_u16be
+  | UInt32BE -> P.pulse_ser_u32be
+  | UInt64BE -> P.pulse_ser_u64be
+  | Unit -> P.pulse_ser_ret
+  | AllBytes -> admit ()
+  | AllZeros -> admit ()
+
+
+let dtyp_pulse_serialize_t #nz #wk (#pk:P.parser_kind nz wk) #hr #i #disj #l' (d:dtyp pk hr i disj l') =
+  x:dtyp_as_pulse_type d ->
+    (let h = dtyp_high_of_pulse d x in
+    P.pulse_ser_t (dtyp_as_parser d) h (dtyp_pulse_match_value d h x))
+
+// inline_for_extraction
+// let frame_stt_left  
+//   (#a:Type u#a)
+//   (#pre:vprop) (#post:a -> vprop)
+//   (frame:vprop)
+//   (e:stt a pre post)
+//   : stt a (frame ** pre) (fun x -> frame ** post x)
+// = admit ()
+
+// inline_for_extraction
+// let frame_stt_left'
+//   (#a:Type u#a)
+//   (#pre:vprop) (#post:vprop)
+//   (frame:vprop)
+//   (e:stt a pre (fun x -> post))
+//   : stt a (frame ** pre) (fun x -> frame ** post)
+// = frame_stt_left _ e
+
+// inline_for_extraction
+// let bind_stt'
+//   (#a:Type u#a) (#b:Type u#b)
+//   (#pre1:vprop) (#post1:vprop) (#post2:b -> vprop)
+//   (e1:stt a pre1 (fun _ -> post1))
+//   (e2:(x:a -> stt b post1 post2))
+//   : stt b pre1 post2
+// = bind_stt e1 e2
+
+let vprop_equiv_rfl #v0 #v1 (_:squash(v0==v1)) : vprop_equiv v0 v1 = vprop_equiv_refl v0
+
+let vprop_equiv_cng #p1 #p2 #p3 #p4 :
+    vprop_equiv p1 p3 -> vprop_equiv p2 p4 -> vprop_equiv (p1 ** p2) (p3 ** p4) =
+  vprop_equiv_cong _ _ _ _
+
+let pure_cng (#p #q:prop) (_:squash (p <==> q)) : vprop_equiv (pure p) (pure q) =
+  PropositionalExtensionality.apply p q;
+  vprop_equiv_refl (pure p)
+
+let vprop_equiv_unit_r (x:vprop) : vprop_equiv (x ** emp) x = vprop_equiv_trans _ _ _ (vprop_equiv_comm _ _) (vprop_equiv_unit _)
+
+inline_for_extraction noextract
+let dtyp_pulse_serialize #nz #wk (#pk:P.parser_kind nz wk) #hr #i #disj #l' (d:dtyp pk hr i disj l') : dtyp_pulse_serialize_t d =
+  match d returns dtyp_pulse_serialize_t d with
+  | DT_IType i -> fun x arr j ->
+    sub_stt _ _ (vprop_equiv_cng (vprop_equiv_unit_r _) (pure_cng ())) (intro_vprop_post_equiv _ _ (fun _ -> vprop_equiv_cng (vprop_equiv_unit_r _) (pure_cng ())))
+    (frame_stt (pure (itype_high_of_pulse i x == itype_high_of_pulse i x)) (itype_pulse_serialize i x arr j))
+  | DT_App _ _ _ _ _ b _ -> fun x arr j ->
+    assert_norm (pulse_match_value_of_binding b == Mkglobal_binding?.p_mv b); // ???
+    sub_stt _ _ (vprop_equiv_cng (vprop_equiv_rfl ()) (vprop_equiv_rfl ()))
+      (intro_vprop_post_equiv _ _ (fun j -> vprop_equiv_cng (vprop_equiv_cng (vprop_equiv_cng (vprop_equiv_rfl ()) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())))
+    (pulse_ser_of_binding b (hide (dtyp_high_of_pulse d x)) x arr j)
+
 (* The main result:
    A validator denotation of `typ`
      related by construction to the parser
@@ -1376,6 +1598,7 @@ let mk_global_binding #nz #wk
                               (interp_inv inv)
                               (interp_disj disj)
                               (interp_loc loc) b)
+                      p_pt p_mv p_ser
                       ([@@@erasable] pf:squash (b == Some? p_reader))
    : global_binding
    = {
@@ -1388,6 +1611,9 @@ let mk_global_binding #nz #wk
        p_t = p_t;
        p_p = p_p;
        p_reader = p_reader;
+       p_pt = p_pt;
+       p_mv = p_mv;
+       p_ser = p_ser;
        p_v = p_v
      }
 
@@ -1423,6 +1649,7 @@ let mk_dtyp_app #nz #wk
                         (interp_disj disj)
                         (interp_loc loc)
                         b)
+                p_pt p_mv p_ser
                 ([@@@erasable] pf:squash (b == Some? p_reader))
    : dtyp #nz #wk pk b inv disj loc
    = let gb = {
@@ -1435,6 +1662,9 @@ let mk_dtyp_app #nz #wk
        p_t = p_t;
        p_p = p_p;
        p_reader = p_reader;
+       p_pt = p_pt;
+       p_mv = p_mv;
+       p_ser = p_ser;
        p_v = p_v
      } in
      DT_App pk b inv disj loc gb ()

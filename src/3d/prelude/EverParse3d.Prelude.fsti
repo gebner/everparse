@@ -22,6 +22,10 @@ module U16 = FStar.UInt16
 module U32 = FStar.UInt32
 module U64 = FStar.UInt64
 module C = FStar.Int.Cast
+module R = Pulse.Lib.Reference
+open Pulse.Lib.Pervasives
+module PA = Pulse.Lib.Array
+module SZ = FStar.SizeT
 
 let pow2_values (x:nat) : Lemma
   (let p = pow2 x in
@@ -705,3 +709,48 @@ let cast_mul_fits_32_64 (x y :U32.t)
   = let n = U64.v (C.uint32_to_uint64 x) in
     let m = U64.v (C.uint32_to_uint64 y) in
     FStar.Math.Lemmas.lemma_mult_lt_sqr n m (pow2 32)
+
+val in_codomain #nz #wk (#k: parser_kind nz wk) #t (p: parser k t) (x: t) : prop
+val serialize #nz #wk (#k: parser_kind nz wk) #t (p: parser k t) (x: t { in_codomain p x }) : GTot (Seq.seq U8.t)
+
+let serialized_fits #nz #wk (#k: parser_kind nz wk) #t (p: parser k t) (x: t) (sz: nat) : prop =
+  in_codomain p x /\ Seq.length (serialize p x) <= sz
+
+let pulse_ser_t #nz #wk #k #t (p: parser #nz #wk k t) (x: erased t) (frame: vprop) : Type0 =
+  arr: PA.array FStar.UInt8.t {SZ.fits (PA.length arr)} -> i: SZ.t { SZ.v i <= PA.length arr /\ serialized_fits p x (PA.length arr - SZ.v i) } ->
+  stt SZ.t
+    ((exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** frame)
+    (fun j ->
+      pure (SZ.v j == SZ.v i + Seq.length (serialize p x)) **
+      (PA.pts_to_range arr (SZ.v i) (SZ.v j) (serialize p x)) **
+      (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf) **
+      frame)
+
+val pulse_ser_u8 (x: U8.t) : pulse_ser_t parse____UINT8 x emp
+val pulse_ser_u8be (x: U8.t) : pulse_ser_t parse____UINT8BE x emp
+val pulse_ser_u16be (x: U16.t) : pulse_ser_t parse____UINT16BE x emp
+val pulse_ser_u32be (x: U32.t) : pulse_ser_t parse____UINT32BE x emp
+val pulse_ser_u64be (x: U64.t) : pulse_ser_t parse____UINT64BE x emp
+val pulse_ser_u16le (x: U16.t) : pulse_ser_t parse____UINT16 x emp
+val pulse_ser_u32le (x: U32.t) : pulse_ser_t parse____UINT32 x emp
+val pulse_ser_u64le (x: U64.t) : pulse_ser_t parse____UINT64 x emp
+
+inline_for_extraction noextract val pulse_ser_dep_pair
+    #nz1 (#k1:parser_kind nz1 WeakKindStrongPrefix) (#t1: Type0) (p1: parser k1 t1)
+    #nz2 #wk2 (#k2:parser_kind nz2 wk2) (#t2: t1 -> Type0) (p2: (x: t1) -> parser k2 (t2 x))
+    (x1: erased t1) (x2: erased (t2 x1))
+    (frame: vprop)
+    (s1: pulse_ser_t p1 x1 frame)
+    (s2: pulse_ser_t (p2 x1) x2 frame) :
+    pulse_ser_t (parse_dep_pair p1 p2) (| reveal x1, reveal x2 |) frame
+inline_for_extraction noextract val pulse_ser_pair
+    #nz1 (#k1:parser_kind nz1 WeakKindStrongPrefix) (#t1: Type0) (p1: parser k1 t1)
+    #nz2 #wk2 (#k2:parser_kind nz2 wk2) (#t2: Type0) (p2: parser k2 t2)
+    (x1: erased t1) (x2: erased t2)
+    (frame: vprop)
+    (s1: pulse_ser_t p1 x1 frame)
+    (s2: pulse_ser_t p2 x2 frame) :
+    pulse_ser_t (parse_pair p1 p2) (reveal x1, reveal x2) frame
+
+inline_for_extraction noextract
+val pulse_ser_ret (#t:Type0) (v:t) : pulse_ser_t (parse_ret v) v emp

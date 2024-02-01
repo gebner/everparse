@@ -17,12 +17,13 @@ endif
 KRML_HOME?=$(realpath ../../../../karamel)
 OTHERFLAGS?=
 
-FSTAR_OPTIONS=$(addprefix --include , $(EVERPARSE_HOME)/src/lowparse $(KRML_HOME)/krmllib $(KRML_HOME)/krmllib/obj) --max_fuel 0 --max_ifuel 2 --initial_ifuel 2 --z3cliopt 'smt.qi.eager_threshold=10'
+FSTAR_OPTIONS=$(addprefix --include , $(EVERPARSE_HOME)/src/lowparse $(KRML_HOME)/krmllib $(KRML_HOME)/krmllib/obj ${STEEL_HOME}/lib/pulse_core ${STEEL_HOME}/lib/steel ${STEEL_HOME}/lib/steel/pulse ${STEEL_HOME}/share/steel/examples/pulse/lib ${STEEL_HOME}/share/steel/examples/pulse/lib/_output/cache) \
+	--max_fuel 0 --max_ifuel 2 --initial_ifuel 2 --z3cliopt 'smt.qi.eager_threshold=10' --load_cmxs steel
 #--z3cliopt 'smt.arith.nl=false' --smtencoding.elim_box true --smtencoding.l_arith_repr native --smtencoding.nl_arith_repr wrapped
 FSTAR=$(FSTAR_HOME)/bin/fstar.exe $(FSTAR_OPTIONS) $(OTHERFLAGS) --cmi
 
 ROOT=$(wildcard *.fst) $(wildcard *.fsti)
-ALREADY_CACHED=--already_cached '+Prims +LowStar +FStar +LowParse +C +Spec.Loops'
+ALREADY_CACHED=--already_cached '+Prims +LowStar +FStar +LowParse +C +Spec.Loops +Pulse +PulseCore'
 
 .depend: $(ROOT)
 	$(FSTAR) --dep full $(ROOT) $(ALREADY_CACHED) --extract 'krml:*,-Prims,-EverParse3d.Interpreter,-FStar.Tactics' > $@.tmp
