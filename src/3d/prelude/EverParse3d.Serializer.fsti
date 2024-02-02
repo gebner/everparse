@@ -15,8 +15,8 @@ val serialize #k #t (p: parser k t) (x: codomain p) : GTot (b:bytes { p b == Som
 let serializes_to #k #t (p: parser k t) (x: t) (y: bytes) : prop =
   in_codomain p x /\ serialize p x == y
 
-val serializes_to_intro #k #t (p: parser k t) (x: t) (b: bytes) :
-    Lemma (requires p b == Some (x, Seq.length b)) (ensures serializes_to p x b)
+val serializes_to_iff #k #t (p: parser k t) (x: t) (b: bytes) :
+  Lemma (serializes_to p x b <==> p b == Some (x, Seq.length b)) [SMTPat (serializes_to p x b)]
 
 val serialize_inj #k #t (p: parser k t) (x1 x2: codomain p) :
     Lemma (requires serialize p x1 == serialize p x2) (ensures x1 == x2)
