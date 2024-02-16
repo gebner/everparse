@@ -716,8 +716,9 @@ val serialize #nz #wk (#k: parser_kind nz wk) #t (p: parser k t) (x: t { in_codo
 let serialized_fits #nz #wk (#k: parser_kind nz wk) #t (p: parser k t) (x: t) (sz: nat) : prop =
   in_codomain p x /\ Seq.length (serialize p x) <= sz
 
-let pulse_ser_t #nz #wk #k #t (p: parser #nz #wk k t) (x: erased t) (frame: vprop) : Type0 =
-  arr: PA.array FStar.UInt8.t {SZ.fits (PA.length arr)} -> i: SZ.t { SZ.v i <= PA.length arr /\ serialized_fits p x (PA.length arr - SZ.v i) } ->
+let pulse_ser_t #nz #wk #k (#t:Type0) (p: parser #nz #wk k t) (x: erased t) (frame: vprop) : Type0 =
+  arr: PA.array FStar.UInt8.t {SZ.fits (PA.length arr)} ->
+  i: SZ.t { SZ.v i <= PA.length arr /\ serialized_fits p x (PA.length arr - SZ.v i) } ->
   stt SZ.t
     ((exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** frame)
     (fun j ->

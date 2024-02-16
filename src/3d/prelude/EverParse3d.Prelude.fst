@@ -370,7 +370,7 @@ let write_le_lem #t (n:pos) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Mult
   Endianness.reveal_le_to_n b2;
   Endianness.le_to_n_inj b1 b2
 
-noextract inline_for_extraction
+noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
 fn rec write_le #t (n:nat) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multiply 8 n) })
     (arr: PA.array U8.t {SZ.fits (PA.length arr)})
@@ -413,7 +413,7 @@ let write_be_lem #t (n:pos) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Mult
   Endianness.reveal_be_to_n b2;
   Endianness.be_to_n_inj b1 b2
 
-noextract inline_for_extraction
+noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
 fn rec write_be #t (n:nat) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multiply 8 n) })
     (arr: PA.array U8.t {SZ.fits (PA.length arr)})
@@ -457,46 +457,64 @@ let pure_cng (#p #q:prop) (_:squash (p <==> q)) : vprop_equiv (pure p) (pure q) 
   PropositionalExtensionality.apply p q;
   vprop_equiv_refl (pure p)
 
-noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
-fn sub_stt' (#t:Type0) #pre #post pre' (post': t -> vprop) (hpre : vprop_equiv pre pre') (hpost: vprop_post_equiv post post') (k : unit -> stt t pre (fun x -> post x))
-  requires pre'
-  returns x:t
-  ensures post' x
-{
-  elim_vprop_equiv hpre;
-  rewrite pre' as pre;
-  let x:t = k ();
-  elim_vprop_equiv (elim_vprop_post_equiv _ _ hpost x);
-  rewrite post x as post' x;
-  x
+fn pulse_ser_u8' (x: U8.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT8 #U8.t parse____UINT8 (hide x) emp = arr i {
+  LS.serializes_to_u8 x; 
+  write_be 1 u8_api x arr i;
 }
 ```
 
-noextract [@@noextract_to "krml"] inline_for_extraction
-let sub_stt (#t:Type0) #pre #post pre' (post': t -> vprop) (hpre : vprop_equiv pre pre') (hpost: vprop_post_equiv post post') (k : stt t pre (fun x -> post x)) =
-  sub_stt' _ _ hpre hpost (fun _ -> k)
+```pulse
+fn pulse_ser_u16be' (x: U16.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT16BE #U16.t parse____UINT16BE (hide x) emp = arr i {
+  LS.serializes_to_u16be x; 
+  write_be 2 u16_api x arr i;
+}
+```
 
-noextract [@@noextract_to "krml"] inline_for_extraction
-let pulse_ser_be #nz #wk #k #t (p: parser #nz #wk k t) (api: bv_api t) n (x: t { api.v x < pow2 (8 `op_Multiply` n) /\ serializes_to p x (Endianness.n_to_be n (api.v x)) }) : pulse_ser_t p x emp =
-  fun arr i ->
-    sub_stt _ _ (vprop_equiv_rfl ()) (intro_vprop_post_equiv _ _ (fun x -> vprop_equiv_cng (vprop_equiv_cng (vprop_equiv_cng (pure_cng ()) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())))
-    (write_be n api x arr i)
+```pulse
+fn pulse_ser_u32be' (x: U32.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT32 #U32.t parse____UINT32BE (hide x) emp = arr i {
+  LS.serializes_to_u32be x; 
+  write_be 4 u32_api x arr i;
+}
+```
 
-noextract [@@noextract_to "krml"] inline_for_extraction
-let pulse_ser_le #nz #wk #k #t (p: parser #nz #wk k t) (api: bv_api t) n (x: t { api.v x < pow2 (8 `op_Multiply` n) /\ serializes_to p x (Endianness.n_to_le n (api.v x)) }) : pulse_ser_t p x emp =
-  fun arr i ->
-    sub_stt _ _ (vprop_equiv_rfl ()) (intro_vprop_post_equiv _ _ (fun x -> vprop_equiv_cng (vprop_equiv_cng (vprop_equiv_cng (pure_cng ()) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())))
-    (write_le n api x arr i)
+```pulse
+fn pulse_ser_u64be' (x: U64.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT64 #U64.t parse____UINT64BE (hide x) emp = arr i {
+  LS.serializes_to_u64be x; 
+  write_be 8 u64_api x arr i;
+}
+```
 
-let pulse_ser_u8 (x: U8.t) = LS.serializes_to_u8 x; pulse_ser_be parse____UINT8 u8_api 1 x
+```pulse
+fn pulse_ser_u16le' (x: U16.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT16 #U16.t parse____UINT16 (hide x) emp = arr i {
+  LS.serializes_to_u16le x; 
+  write_le 2 u16_api x arr i;
+}
+```
+
+```pulse
+fn pulse_ser_u32le' (x: U32.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT32 #U32.t parse____UINT32 (hide x) emp = arr i {
+  LS.serializes_to_u32le x; 
+  write_le 4 u32_api x arr i;
+}
+```
+
+```pulse
+fn pulse_ser_u64le' (x: U64.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT64 #U64.t parse____UINT64 (hide x) emp = arr i {
+  LS.serializes_to_u64le x; 
+  write_le 8 u64_api x arr i;
+}
+```
+
+let pulse_ser_u8 = pulse_ser_u8'
 let pulse_ser_u8be = pulse_ser_u8
-let pulse_ser_u16be (x: U16.t) = LS.serializes_to_u16be x; pulse_ser_be parse____UINT16BE u16_api 2 x
-let pulse_ser_u32be (x: U32.t) = LS.serializes_to_u32be x; pulse_ser_be parse____UINT32BE u32_api 4 x
-let pulse_ser_u64be (x: U64.t) = LS.serializes_to_u64be x; pulse_ser_be parse____UINT64BE u64_api 8 x
-let pulse_ser_u16le (x: U16.t) = LS.serializes_to_u16le x; pulse_ser_le parse____UINT16 u16_api 2 x
-let pulse_ser_u32le (x: U32.t) = LS.serializes_to_u32le x; pulse_ser_le parse____UINT32 u32_api 4 x
-let pulse_ser_u64le (x: U64.t) = LS.serializes_to_u64le x; pulse_ser_le parse____UINT64 u64_api 8 x
+let pulse_ser_u16be = pulse_ser_u16be'
+let pulse_ser_u32be = pulse_ser_u32be'
+let pulse_ser_u64be = pulse_ser_u64be'
+let pulse_ser_u16le = pulse_ser_u16le'
+let pulse_ser_u32le = pulse_ser_u32le'
+let pulse_ser_u64le = pulse_ser_u64le'
+
 
 noextract inline_for_extraction
 ```pulse
@@ -507,15 +525,8 @@ fn pulse_ser_dep_pair'
     (frame: vprop)
     (s1: pulse_ser_t p1 (reveal x1) frame)
     (s2: pulse_ser_t (p2 x1) (reveal x2) frame)
-    (arr: PA.array FStar.UInt8.t {SZ.fits (PA.length arr)})
-    (i: SZ.t { SZ.v i <= PA.length arr /\ serialized_fits (parse_dep_pair p1 p2) (| reveal x1, reveal x2 |) (PA.length arr - SZ.v i) })
-  requires (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** frame
-  returns j:SZ.t
-  ensures
-    pure (SZ.v j == SZ.v i + Seq.length (serialize (parse_dep_pair p1 p2) (reveal (hide (| reveal x1, reveal x2 |)))))
-    ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (serialize (parse_dep_pair p1 p2) (reveal (hide (| reveal x1, reveal x2 |))))
-    ** (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf)
-    ** frame
+  : pulse_ser_t #(nz1 || nz2) #wk2 #(and_then_kind k1 k2) #(dtuple2 t1 t2) (parse_dep_pair p1 p2) (| reveal x1, reveal x2 |) frame
+  = arr i
 {
   LS.in_codomain_dtuple2 p1 p2 x1 x2;
   LS.serializes_to_dtuple2 p1 p2 x1 x2;
@@ -535,9 +546,7 @@ let pulse_ser_dep_pair
     (s1: pulse_ser_t p1 x1 frame)
     (s2: pulse_ser_t (p2 x1) x2 frame) :
     pulse_ser_t (parse_dep_pair p1 p2) (| reveal x1, reveal x2 |) frame =
-  fun arr i ->
-    sub_stt _ _ (vprop_equiv_rfl ()) (intro_vprop_post_equiv _ _ (fun x -> vprop_equiv_cng (vprop_equiv_cng (vprop_equiv_cng (pure_cng ()) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())))
-    (pulse_ser_dep_pair' p1 p2 x1 x2 frame s1 s2 arr i)
+  fun arr i -> pulse_ser_dep_pair' p1 p2 x1 x2 frame s1 s2 arr i
 
 inline_for_extraction noextract
 ```pulse
@@ -548,15 +557,8 @@ fn pulse_ser_pair'
     (frame: vprop)
     (s1: pulse_ser_t p1 (reveal x1) frame)
     (s2: pulse_ser_t p2 (reveal x2) frame)
-    (arr: PA.array FStar.UInt8.t {SZ.fits (PA.length arr)})
-    (i: SZ.t { SZ.v i <= PA.length arr /\ serialized_fits (parse_pair p1 p2) (reveal x1, reveal x2) (PA.length arr - SZ.v i) })
-  requires (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** frame
-  returns j:SZ.t
-  ensures
-    pure (SZ.v j == SZ.v i + Seq.length (serialize (parse_pair p1 p2) (reveal (hide (reveal x1, reveal x2)))))
-    ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (serialize (parse_pair p1 p2) (reveal (hide (reveal x1, reveal x2))))
-    ** (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf)
-    ** frame
+  : pulse_ser_t #(nz1 || nz2) #wk2 #(and_then_kind k1 k2) #(tuple2 t1 t2) (parse_pair p1 p2) (reveal x1, reveal x2) frame
+  = arr i
 {
   LS.in_codomain_nondep_then p1 p2 x1 x2;
   LS.serializes_to_nondep_then p1 p2 x1 x2;
@@ -577,21 +579,13 @@ let pulse_ser_pair
     (s2: pulse_ser_t p2 x2 frame) :
     pulse_ser_t (parse_pair p1 p2) (reveal x1, reveal x2) frame =
   fun arr i ->
-    sub_stt _ _ (vprop_equiv_rfl ()) (intro_vprop_post_equiv _ _ (fun x -> vprop_equiv_cng (vprop_equiv_cng (vprop_equiv_cng (pure_cng ()) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())))
-    (pulse_ser_pair' p1 p2 x1 x2 frame s1 s2 arr i)
+    pulse_ser_pair' p1 p2 x1 x2 frame s1 s2 arr i
 
 inline_for_extraction noextract
 ```pulse
 fn pulse_ser_ret' (#t:Type0) (v:t)
-    (arr: PA.array FStar.UInt8.t {SZ.fits (PA.length arr)})
-    (i: SZ.t { SZ.v i <= PA.length arr /\ serialized_fits (parse_ret v) v (PA.length arr - SZ.v i) })
-  requires (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** emp
-  returns j:SZ.t
-  ensures
-    pure (SZ.v j == SZ.v i + Seq.length (serialize (parse_ret v) v))
-    ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (serialize (parse_ret v) v)
-    ** (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf)
-    ** emp
+  : pulse_ser_t #false #WeakKindStrongPrefix #ret_kind #t (parse_ret v) v emp
+  = arr i
 {
   with buf. assert (PA.pts_to_range arr (SZ.v i) (PA.length arr) buf);
   PA.pts_to_range_split arr (SZ.v i) (SZ.v i) (PA.length arr);
@@ -601,13 +595,10 @@ fn pulse_ser_ret' (#t:Type0) (v:t)
   assert pure (Seq.length (Seq.empty #U8.t) == 0);
   i
 }
-
 ```
+
 inline_for_extraction noextract
-let pulse_ser_ret (#t:Type0) (v:t) : pulse_ser_t (parse_ret v) v emp =
-  fun arr i ->
-  sub_stt _ _ (vprop_equiv_rfl ()) (intro_vprop_post_equiv _ _ (fun _ -> vprop_equiv_cng (vprop_equiv_cng (vprop_equiv_cng (pure_cng ()) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())) (vprop_equiv_rfl ())))
-  (pulse_ser_ret' v arr i)
+let pulse_ser_ret (#t:Type0) (v:t) : pulse_ser_t (parse_ret v) v emp = pulse_ser_ret' v
 
 let pulse_size_t #nz #wk #k #t (p: parser #nz #wk k t) (x: erased (codomain p)) (frame: vprop) =
   stt SZ.t frame (fun j -> frame ** pure (serialized_fits p x (SZ.v j)))
