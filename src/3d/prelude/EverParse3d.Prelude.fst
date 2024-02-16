@@ -373,7 +373,7 @@ let write_le_lem #t (n:pos) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Mult
 noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
 fn rec write_le #t (n:nat) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multiply 8 n) })
-    (arr: PA.array U8.t {SZ.fits (PA.length arr)})
+    (arr: PA.array U8.t)
     (i: SZ.t { SZ.v i + n <= PA.length arr })
   requires (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** emp
   returns j:SZ.t
@@ -416,7 +416,7 @@ let write_be_lem #t (n:pos) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Mult
 noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
 fn rec write_be #t (n:nat) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multiply 8 n) })
-    (arr: PA.array U8.t {SZ.fits (PA.length arr)})
+    (arr: PA.array U8.t)
     (i: SZ.t { SZ.v i + n <= PA.length arr })
   requires (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** emp
   returns j:SZ.t
