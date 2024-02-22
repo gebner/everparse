@@ -339,16 +339,17 @@ let seqlem #t (s1 : Seq.seq t) (x : t) :
       (ensures Seq.upd s1 0 x == Seq.create 1 x) =
   seqext1 (Seq.upd s1 0 x) (Seq.create 1 x)
 
-noeq type bv_api (t:Type0) : Type0 = {
-  v : t -> GTot nat;
-  shift8 : i:t -> o:t { v o == v i / 256 };
-  lsbyte : i:t -> o:UInt8.t { U8.v o == v i % 256 };
+inline_for_extraction noextract
+class bv_api (t:Type0) : Type0 = {
+  bv_v : t -> GTot nat;
+  shift8 : i:t -> o:t { bv_v o == bv_v i / 256 };
+  lsbyte : i:t -> o:UInt8.t { U8.v o == bv_v i % 256 };
 }
 
-inline_for_extraction noextract let u8_api : bv_api U8.t = { v = U8.v; shift8 = (fun x -> U8.uint_to_t (U8.v x / 256)); lsbyte = (fun x -> U8.uint_to_t (U8.v x % 256)) }
-inline_for_extraction noextract let u16_api : bv_api U16.t = { v = U16.v; shift8 = (fun x -> U16.uint_to_t (U16.v x / 256)); lsbyte = (fun x -> U8.uint_to_t (U16.v x % 256)) }
-inline_for_extraction noextract let u32_api : bv_api U32.t = { v = U32.v; shift8 = (fun x -> U32.uint_to_t (U32.v x / 256)); lsbyte = (fun x -> U8.uint_to_t (U32.v x % 256)) }
-inline_for_extraction noextract let u64_api : bv_api U64.t = { v = U64.v; shift8 = (fun x -> U64.uint_to_t (U64.v x / 256)); lsbyte = (fun x -> U8.uint_to_t (U64.v x % 256)) }
+inline_for_extraction noextract instance u8_api : bv_api U8.t = { bv_v = U8.v; shift8 = (fun x -> 0uy); lsbyte = (fun x -> x) }
+inline_for_extraction noextract instance u16_api : bv_api U16.t = { bv_v = U16.v; shift8 = (fun x -> U16.div x 256us); lsbyte = Int.Cast.uint16_to_uint8 }
+inline_for_extraction noextract instance u32_api : bv_api U32.t = { bv_v = U32.v; shift8 = (fun x -> U32.div x 256ul); lsbyte = Int.Cast.uint32_to_uint8 }
+inline_for_extraction noextract instance u64_api : bv_api U64.t = { bv_v = U64.v; shift8 = (fun x -> U64.div x 256uL); lsbyte = Int.Cast.uint64_to_uint8 }
 
 let pow2_8_mul (n:nat) : Lemma (pow2 (8 `op_Multiply` (n+1)) == 256 `op_Multiply` pow2 (8 `op_Multiply` n)) =
   let k = op_Multiply 8 n in
@@ -361,25 +362,25 @@ let pow2_8_mul (n:nat) : Lemma (pow2 (8 `op_Multiply` (n+1)) == 256 `op_Multiply
   Math.Lemmas.pow2_double_mult (k+6);
   Math.Lemmas.pow2_double_mult (k+7)
 
-let write_le_lem #t (n:pos) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multiply 8 n) }) :
-    Lemma (Seq.cons (api.lsbyte x) (pow2_8_mul (n-1); Endianness.n_to_le (n - 1) (api.v (api.shift8 x))) == Endianness.n_to_le n (api.v x)) =
+let write_le_lem #t (n:pos) {| bv_api t |} (x:t { bv_v x < Prims.pow2 (op_Multiply 8 n) }) :
+    Lemma (Seq.cons (lsbyte x) (pow2_8_mul (n-1); Endianness.n_to_le (n - 1) (bv_v (shift8 x))) == Endianness.n_to_le n (bv_v x)) =
   pow2_8_mul (n-1);
-  let b1 = Seq.cons (api.lsbyte x) (Endianness.n_to_le (n - 1) (api.v (api.shift8 x))) in
-  let b2 = Endianness.n_to_le n (api.v x) in
+  let b1 = Seq.cons (lsbyte x) (Endianness.n_to_le (n - 1) (bv_v (shift8 x))) in
+  let b2 = Endianness.n_to_le n (bv_v x) in
   Endianness.reveal_le_to_n b1;
   Endianness.reveal_le_to_n b2;
   Endianness.le_to_n_inj b1 b2
 
 noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
-fn rec write_le #t (n:nat) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multiply 8 n) })
+fn rec write_le #t (n:nat) (api: bv_api t) (x:t { bv_v x < Prims.pow2 (op_Multiply 8 n) })
     (arr: PA.array U8.t)
     (i: SZ.t { SZ.v i + n <= PA.length arr })
   requires (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** emp
   returns j:SZ.t
   ensures
     pure (SZ.v j == SZ.v i + n)
-    ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (Endianness.n_to_le n (api.v x))
+    ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (Endianness.n_to_le n (bv_v x))
     ** (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf)
     ** emp
 {
@@ -388,41 +389,41 @@ fn rec write_le #t (n:nat) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multi
     PA.pts_to_range_split arr (SZ.v i) (SZ.v i) (PA.length arr);
     FStar.Seq.Properties.slice_is_empty buf 0;
     FStar.Seq.Properties.slice_length buf;
-    Seq.lemma_empty (Endianness.n_to_le 0 (api.v x));
+    Seq.lemma_empty (Endianness.n_to_le 0 (bv_v x));
     i
   } else {
     PA.pts_to_range_split arr (SZ.v i) (SZ.v i + 1) (PA.length arr);
     with buf1. assert PA.pts_to_range arr (SZ.v i) (SZ.v i + 1) buf1;
-    PA.pts_to_range_upd arr i (api.lsbyte x) #(SZ.v i);
-    seqlem buf1 (api.lsbyte x);
+    PA.pts_to_range_upd arr i (lsbyte x) #(SZ.v i);
+    seqlem buf1 (lsbyte x);
     pow2_8_mul (n-1);
-    let j = write_le (n-1) api (api.shift8 x) arr (SZ.uint_to_t (SZ.v i + 1));
+    let j = write_le (n-1) api (shift8 x) arr (SZ.uint_to_t (SZ.v i + 1));
     PA.pts_to_range_join arr (SZ.v i) (SZ.v i + 1) (SZ.v j);
-    write_le_lem n api x;
+    write_le_lem n x;
     j
   }
 }
 ```
 
-let write_be_lem #t (n:pos) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multiply 8 n) }) :
-    Lemma (Seq.snoc (pow2_8_mul (n-1); Endianness.n_to_be (n - 1) (api.v (api.shift8 x))) (api.lsbyte x) == Endianness.n_to_be n (api.v x)) =
+let write_be_lem #t (n:pos) {| bv_api t |} (x:t { bv_v x < Prims.pow2 (op_Multiply 8 n) }) :
+    Lemma (Seq.snoc (pow2_8_mul (n-1); Endianness.n_to_be (n - 1) (bv_v (shift8 x))) (lsbyte x) == Endianness.n_to_be n (bv_v x)) =
   pow2_8_mul (n-1);
-  let b1 = Seq.snoc (Endianness.n_to_be (n - 1) (api.v (api.shift8 x))) (api.lsbyte x) in
-  let b2 = Endianness.n_to_be n (api.v x) in
+  let b1 = Seq.snoc (Endianness.n_to_be (n - 1) (bv_v (shift8 x))) (lsbyte x) in
+  let b2 = Endianness.n_to_be n (bv_v x) in
   Endianness.reveal_be_to_n b1;
   Endianness.reveal_be_to_n b2;
   Endianness.be_to_n_inj b1 b2
 
 noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
-fn rec write_be #t (n:nat) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multiply 8 n) })
+fn rec write_be #t (n:nat) (api: bv_api t) (x:t { bv_v x < Prims.pow2 (op_Multiply 8 n) })
     (arr: PA.array U8.t)
     (i: SZ.t { SZ.v i + n <= PA.length arr })
   requires (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** emp
   returns j:SZ.t
   ensures
     pure (SZ.v j == SZ.v i + n)
-    ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (Endianness.n_to_be n (api.v x))
+    ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (Endianness.n_to_be n (bv_v x))
     ** (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf)
     ** emp
 {
@@ -431,31 +432,21 @@ fn rec write_be #t (n:nat) (api: bv_api t) (x:t { api.v x < Prims.pow2 (op_Multi
     PA.pts_to_range_split arr (SZ.v i) (SZ.v i) (PA.length arr);
     FStar.Seq.Properties.slice_is_empty buf 0;
     FStar.Seq.Properties.slice_length buf;
-    Seq.lemma_empty (Endianness.n_to_be 0 (api.v x));
+    Seq.lemma_empty (Endianness.n_to_be 0 (bv_v x));
     i
   } else {
     pow2_8_mul (n-1);
-    let j = write_be (n-1) api (api.shift8 x) arr i;
+    let j = write_be (n-1) api (shift8 x) arr i;
     PA.pts_to_range_split arr (SZ.v j) (SZ.v j + 1) (PA.length arr);
     with buf1. assert PA.pts_to_range arr (SZ.v j) (SZ.v j + 1) buf1;
-    PA.pts_to_range_upd arr j (api.lsbyte x) #(SZ.v j);
-    seqlem buf1 (api.lsbyte x);
+    PA.pts_to_range_upd arr j (lsbyte x) #(SZ.v j);
+    seqlem buf1 (lsbyte x);
     PA.pts_to_range_join arr (SZ.v i) (SZ.v j) (SZ.v j + 1);
-    write_be_lem n api x;
+    write_be_lem n x;
     SZ.uint_to_t (SZ.v j + 1)
   }
 }
 ```
-
-let vprop_equiv_rfl #v0 #v1 (_:squash(v0==v1)) : vprop_equiv v0 v1 = vprop_equiv_refl v0
-
-let vprop_equiv_cng #p1 #p2 #p3 #p4 :
-    vprop_equiv p1 p3 -> vprop_equiv p2 p4 -> vprop_equiv (p1 ** p2) (p3 ** p4) =
-  vprop_equiv_cong _ _ _ _
-
-let pure_cng (#p #q:prop) (_:squash (p <==> q)) : vprop_equiv (pure p) (pure q) =
-  PropositionalExtensionality.apply p q;
-  vprop_equiv_refl (pure p)
 
 ```pulse
 fn pulse_ser_u8' (x: U8.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT8 #U8.t parse____UINT8 (hide x) emp = arr i {
