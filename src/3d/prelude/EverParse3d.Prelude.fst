@@ -351,7 +351,10 @@ inline_for_extraction noextract instance u16_api : bv_api U16.t = { bv_v = U16.v
 inline_for_extraction noextract instance u32_api : bv_api U32.t = { bv_v = U32.v; shift8 = (fun x -> U32.div x 256ul); lsbyte = Int.Cast.uint32_to_uint8 }
 inline_for_extraction noextract instance u64_api : bv_api U64.t = { bv_v = U64.v; shift8 = (fun x -> U64.div x 256uL); lsbyte = Int.Cast.uint64_to_uint8 }
 
-let pow2_8_mul (n:nat) : Lemma (pow2 (8 `op_Multiply` (n+1)) == 256 `op_Multiply` pow2 (8 `op_Multiply` n)) =
+let pow256 (n:nat) = pow2 (8 `op_Multiply` n)
+
+val pow256_mul (n:nat) : Lemma (pow256 (n+1) == 256 `op_Multiply` pow256 n)
+let pow256_mul n =
   let k = op_Multiply 8 n in
   Math.Lemmas.pow2_double_mult k;
   Math.Lemmas.pow2_double_mult (k+1);
@@ -362,138 +365,146 @@ let pow2_8_mul (n:nat) : Lemma (pow2 (8 `op_Multiply` (n+1)) == 256 `op_Multiply
   Math.Lemmas.pow2_double_mult (k+6);
   Math.Lemmas.pow2_double_mult (k+7)
 
-let write_le_lem #t (n:pos) {| bv_api t |} (x:t { bv_v x < Prims.pow2 (op_Multiply 8 n) }) :
-    Lemma (Seq.cons (lsbyte x) (pow2_8_mul (n-1); Endianness.n_to_le (n - 1) (bv_v (shift8 x))) == Endianness.n_to_le n (bv_v x)) =
-  pow2_8_mul (n-1);
+let write_le_lem #t (n:pos) {| bv_api t |} (x:t { bv_v x < pow256 n }) :
+    Lemma (Seq.cons (lsbyte x) (pow256_mul (n-1); Endianness.n_to_le (n - 1) (bv_v (shift8 x))) == Endianness.n_to_le n (bv_v x)) =
+  pow256_mul (n-1);
   let b1 = Seq.cons (lsbyte x) (Endianness.n_to_le (n - 1) (bv_v (shift8 x))) in
   let b2 = Endianness.n_to_le n (bv_v x) in
   Endianness.reveal_le_to_n b1;
   Endianness.reveal_le_to_n b2;
   Endianness.le_to_n_inj b1 b2
 
+let le_ser_t #t (n: erased nat) (api: bv_api t) =
+  (x:t { bv_v x < pow256 n }) ->
+  (arr: PA.array U8.t) ->
+  (i: SZ.t { SZ.v i + n <= PA.length arr }) ->
+  stt SZ.t
+    (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf)
+    (fun j -> pure (SZ.v j == SZ.v i + n)
+      ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (Endianness.n_to_le n (bv_v x))
+      ** (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf))
+
 noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
-fn rec write_le #t (n:nat) (api: bv_api t) (x:t { bv_v x < Prims.pow2 (op_Multiply 8 n) })
-    (arr: PA.array U8.t)
-    (i: SZ.t { SZ.v i + n <= PA.length arr })
-  requires (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** emp
-  returns j:SZ.t
-  ensures
-    pure (SZ.v j == SZ.v i + n)
-    ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (Endianness.n_to_le n (bv_v x))
-    ** (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf)
-    ** emp
-{
-  if (n = 0) {
-    with buf. assert (PA.pts_to_range arr (SZ.v i) (PA.length arr) buf);
-    PA.pts_to_range_split arr (SZ.v i) (SZ.v i) (PA.length arr);
-    FStar.Seq.Properties.slice_is_empty buf 0;
-    FStar.Seq.Properties.slice_length buf;
-    Seq.lemma_empty (Endianness.n_to_le 0 (bv_v x));
-    i
-  } else {
-    PA.pts_to_range_split arr (SZ.v i) (SZ.v i + 1) (PA.length arr);
-    with buf1. assert PA.pts_to_range arr (SZ.v i) (SZ.v i + 1) buf1;
-    PA.pts_to_range_upd arr i (lsbyte x) #(SZ.v i);
-    seqlem buf1 (lsbyte x);
-    pow2_8_mul (n-1);
-    let j = write_le (n-1) api (shift8 x) arr (SZ.uint_to_t (SZ.v i + 1));
-    PA.pts_to_range_join arr (SZ.v i) (SZ.v i + 1) (SZ.v j);
-    write_le_lem n x;
-    j
-  }
+fn write_le_base #t (api: bv_api t) : le_ser_t #t 0 api = x arr i {
+  with buf. assert (PA.pts_to_range arr (SZ.v i) (PA.length arr) buf);
+  PA.pts_to_range_split arr (SZ.v i) (SZ.v i) (PA.length arr);
+  FStar.Seq.Properties.slice_is_empty buf 0;
+  FStar.Seq.Properties.slice_length buf;
+  Seq.lemma_empty (Endianness.n_to_le 0 (bv_v x));
+  i
+}
+```
+
+noextract [@@noextract_to "krml"] inline_for_extraction
+```pulse
+fn write_le_step #t (#api: bv_api t) #n (ih: le_ser_t n api) : le_ser_t #t (n+1) api = x arr i {
+  let i' = SZ.add i 1sz;
+  PA.pts_to_range_split arr (SZ.v i) (SZ.v i') (PA.length arr);
+  with buf1. assert PA.pts_to_range arr (SZ.v i) (SZ.v i') buf1;
+  PA.pts_to_range_upd arr i (lsbyte x) #(SZ.v i);
+  seqlem buf1 (lsbyte x);
+  pow256_mul n;
+  let j = ih (shift8 x) arr i';
+  PA.pts_to_range_join arr (SZ.v i) (SZ.v i') (SZ.v j);
+  write_le_lem (n+1) x;
+  j
 }
 ```
 
 let write_be_lem #t (n:pos) {| bv_api t |} (x:t { bv_v x < Prims.pow2 (op_Multiply 8 n) }) :
-    Lemma (Seq.snoc (pow2_8_mul (n-1); Endianness.n_to_be (n - 1) (bv_v (shift8 x))) (lsbyte x) == Endianness.n_to_be n (bv_v x)) =
-  pow2_8_mul (n-1);
+    Lemma (Seq.snoc (pow256_mul (n-1); Endianness.n_to_be (n - 1) (bv_v (shift8 x))) (lsbyte x) == Endianness.n_to_be n (bv_v x)) =
+  pow256_mul (n-1);
   let b1 = Seq.snoc (Endianness.n_to_be (n - 1) (bv_v (shift8 x))) (lsbyte x) in
   let b2 = Endianness.n_to_be n (bv_v x) in
   Endianness.reveal_be_to_n b1;
   Endianness.reveal_be_to_n b2;
   Endianness.be_to_n_inj b1 b2
 
+let be_ser_t #t (n: erased nat) (api: bv_api t) =
+  (x:t { bv_v x < pow256 n }) ->
+  (arr: PA.array U8.t) ->
+  (i: SZ.t { SZ.v i + n <= PA.length arr }) ->
+  stt SZ.t
+    (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf)
+    (fun j -> pure (SZ.v j == SZ.v i + n)
+      ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (Endianness.n_to_be n (bv_v x))
+      ** (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf))
+
 noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
-fn rec write_be #t (n:nat) (api: bv_api t) (x:t { bv_v x < Prims.pow2 (op_Multiply 8 n) })
-    (arr: PA.array U8.t)
-    (i: SZ.t { SZ.v i + n <= PA.length arr })
-  requires (exists* buf. PA.pts_to_range arr (SZ.v i) (PA.length arr) buf) ** emp
-  returns j:SZ.t
-  ensures
-    pure (SZ.v j == SZ.v i + n)
-    ** PA.pts_to_range arr (SZ.v i) (SZ.v j) (Endianness.n_to_be n (bv_v x))
-    ** (exists* buf. PA.pts_to_range arr (SZ.v j) (PA.length arr) buf)
-    ** emp
-{
-  if (n = 0) {
-    with buf. assert (PA.pts_to_range arr (SZ.v i) (PA.length arr) buf);
-    PA.pts_to_range_split arr (SZ.v i) (SZ.v i) (PA.length arr);
-    FStar.Seq.Properties.slice_is_empty buf 0;
-    FStar.Seq.Properties.slice_length buf;
-    Seq.lemma_empty (Endianness.n_to_be 0 (bv_v x));
-    i
-  } else {
-    pow2_8_mul (n-1);
-    let j = write_be (n-1) api (shift8 x) arr i;
-    PA.pts_to_range_split arr (SZ.v j) (SZ.v j + 1) (PA.length arr);
-    with buf1. assert PA.pts_to_range arr (SZ.v j) (SZ.v j + 1) buf1;
-    PA.pts_to_range_upd arr j (lsbyte x) #(SZ.v j);
-    seqlem buf1 (lsbyte x);
-    PA.pts_to_range_join arr (SZ.v i) (SZ.v j) (SZ.v j + 1);
-    write_be_lem n x;
-    SZ.uint_to_t (SZ.v j + 1)
-  }
+fn write_be_base #t (api: bv_api t) : be_ser_t #t 0 api = x arr i {
+  with buf. assert (PA.pts_to_range arr (SZ.v i) (PA.length arr) buf);
+  PA.pts_to_range_split arr (SZ.v i) (SZ.v i) (PA.length arr);
+  FStar.Seq.Properties.slice_is_empty buf 0;
+  FStar.Seq.Properties.slice_length buf;
+  Seq.lemma_empty (Endianness.n_to_be 0 (bv_v x));
+  i
+}
+```
+
+noextract [@@noextract_to "krml"] inline_for_extraction
+```pulse
+fn write_be_step #t (#api: bv_api t) #n (ih: be_ser_t n api) : be_ser_t #t (n+1) api = x arr i {
+  pow256_mul n;
+  let j = ih (shift8 x) arr i;
+  let j' = SZ.add j 1sz;
+  PA.pts_to_range_split arr (SZ.v j) (SZ.v j') (PA.length arr);
+  with buf1. assert PA.pts_to_range arr (SZ.v j) (SZ.v j') buf1;
+  PA.pts_to_range_upd arr j (lsbyte x) #(SZ.v j);
+  seqlem buf1 (lsbyte x);
+  PA.pts_to_range_join arr (SZ.v i) (SZ.v j) (SZ.v j');
+  write_be_lem (n+1) x;
+  j'
 }
 ```
 
 ```pulse
 fn pulse_ser_u8' (x: U8.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT8 #U8.t parse____UINT8 (hide x) emp = arr i {
   LS.serializes_to_u8 x; 
-  write_be 1 u8_api x arr i;
+  write_be_step (write_be_base u8_api) x arr i;
 }
 ```
 
 ```pulse
 fn pulse_ser_u16be' (x: U16.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT16BE #U16.t parse____UINT16BE (hide x) emp = arr i {
   LS.serializes_to_u16be x; 
-  write_be 2 u16_api x arr i;
+  write_be_step (write_be_step (write_be_base u16_api)) x arr i;
 }
 ```
 
 ```pulse
 fn pulse_ser_u32be' (x: U32.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT32 #U32.t parse____UINT32BE (hide x) emp = arr i {
   LS.serializes_to_u32be x; 
-  write_be 4 u32_api x arr i;
+  write_be_step (write_be_step (write_be_step (write_be_step (write_be_base u32_api)))) x arr i;
 }
 ```
 
 ```pulse
 fn pulse_ser_u64be' (x: U64.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT64 #U64.t parse____UINT64BE (hide x) emp = arr i {
   LS.serializes_to_u64be x; 
-  write_be 8 u64_api x arr i;
+  write_be_step (write_be_step (write_be_step (write_be_step (write_be_step (write_be_step (write_be_step (write_be_step (write_be_base u64_api)))))))) x arr i;
 }
 ```
 
 ```pulse
 fn pulse_ser_u16le' (x: U16.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT16 #U16.t parse____UINT16 (hide x) emp = arr i {
-  LS.serializes_to_u16le x; 
-  write_le 2 u16_api x arr i;
+  LS.serializes_to_u16le x;
+  write_le_step (write_le_step (write_le_base u16_api)) x arr i;
 }
 ```
 
 ```pulse
 fn pulse_ser_u32le' (x: U32.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT32 #U32.t parse____UINT32 (hide x) emp = arr i {
   LS.serializes_to_u32le x; 
-  write_le 4 u32_api x arr i;
+  write_le_step (write_le_step (write_le_step (write_le_step (write_le_base u32_api)))) x arr i;
 }
 ```
 
 ```pulse
 fn pulse_ser_u64le' (x: U64.t) : pulse_ser_t #true #WeakKindStrongPrefix #kind____UINT64 #U64.t parse____UINT64 (hide x) emp = arr i {
   LS.serializes_to_u64le x; 
-  write_le 8 u64_api x arr i;
+  write_le_step (write_le_step (write_le_step (write_le_step (write_le_step (write_le_step (write_le_step (write_le_step (write_le_base u64_api)))))))) x arr i;
 }
 ```
 
@@ -506,8 +517,7 @@ let pulse_ser_u16le = pulse_ser_u16le'
 let pulse_ser_u32le = pulse_ser_u32le'
 let pulse_ser_u64le = pulse_ser_u64le'
 
-
-noextract inline_for_extraction
+noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
 fn pulse_ser_dep_pair'
     #nz1 (#k1:parser_kind nz1 WeakKindStrongPrefix) (#t1: Type0) (p1: parser k1 t1)
@@ -528,7 +538,7 @@ fn pulse_ser_dep_pair'
 }
 ```
 
-inline_for_extraction noextract
+noextract [@@noextract_to "krml"] inline_for_extraction
 let pulse_ser_dep_pair
     #nz1 (#k1:parser_kind nz1 WeakKindStrongPrefix) (#t1: Type0) (p1: parser k1 t1)
     #nz2 #wk2 (#k2:parser_kind nz2 wk2) (#t2: t1 -> Type0) (p2: (x: t1) -> parser k2 (t2 x))
@@ -537,9 +547,9 @@ let pulse_ser_dep_pair
     (s1: pulse_ser_t p1 x1 frame)
     (s2: pulse_ser_t (p2 x1) x2 frame) :
     pulse_ser_t (parse_dep_pair p1 p2) (| reveal x1, reveal x2 |) frame =
-  fun arr i -> pulse_ser_dep_pair' p1 p2 x1 x2 frame s1 s2 arr i
+  pulse_ser_dep_pair' p1 p2 x1 x2 frame s1 s2
 
-inline_for_extraction noextract
+noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
 fn pulse_ser_pair'
     #nz1 (#k1:parser_kind nz1 WeakKindStrongPrefix) (#t1: Type0) (p1: parser k1 t1)
@@ -560,7 +570,7 @@ fn pulse_ser_pair'
 }
 ```
 
-inline_for_extraction noextract
+noextract [@@noextract_to "krml"] inline_for_extraction
 let pulse_ser_pair
     #nz1 (#k1:parser_kind nz1 WeakKindStrongPrefix) (#t1: Type0) (p1: parser k1 t1)
     #nz2 #wk2 (#k2:parser_kind nz2 wk2) (#t2: Type0) (p2: parser k2 t2)
@@ -572,7 +582,7 @@ let pulse_ser_pair
   fun arr i ->
     pulse_ser_pair' p1 p2 x1 x2 frame s1 s2 arr i
 
-inline_for_extraction noextract
+noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
 fn pulse_ser_ret' (#t:Type0) (v:t)
   : pulse_ser_t #false #WeakKindStrongPrefix #ret_kind #t (parse_ret v) v emp
@@ -588,13 +598,13 @@ fn pulse_ser_ret' (#t:Type0) (v:t)
 }
 ```
 
-inline_for_extraction noextract
+noextract [@@noextract_to "krml"] inline_for_extraction
 let pulse_ser_ret (#t:Type0) (v:t) : pulse_ser_t (parse_ret v) v emp = pulse_ser_ret' v
 
 let pulse_size_t #nz #wk #k #t (p: parser #nz #wk k t) (x: erased (codomain p)) (frame: vprop) =
   stt SZ.t frame (fun j -> frame ** pure (serialized_fits p x (SZ.v j)))
 
-noextract inline_for_extraction
+noextract [@@noextract_to "krml"] inline_for_extraction
 ```pulse
 fn pulse_size_fixed' #nz #wk #k (#t:Type0) (p: parser #nz #wk k t) (x: erased (codomain p)) (sz: SZ.t {serialized_fits p x (SZ.v sz)})
   requires emp
@@ -605,15 +615,15 @@ fn pulse_size_fixed' #nz #wk #k (#t:Type0) (p: parser #nz #wk k t) (x: erased (c
 }
 ```
 
-noextract inline_for_extraction
+noextract [@@noextract_to "krml"] inline_for_extraction
 let pulse_size_fixed #nz #wk #k #t (p: parser #nz #wk k t) (x: erased (codomain p)) (sz: SZ.t {serialized_fits p x (SZ.v sz)}) :
     pulse_size_t p x emp =
   pulse_size_fixed' p x sz
 
-inline_for_extraction let pulse_size_u8 (x: U8.t) = LS.serializes_to_u8 x; pulse_size_fixed parse____UINT8 x (SZ.uint_to_t 1)
-inline_for_extraction let pulse_size_u16be (x: U16.t) = LS.serializes_to_u16be x; pulse_size_fixed parse____UINT16BE x (SZ.uint_to_t 2)
-inline_for_extraction let pulse_size_u32be (x: U32.t) = LS.serializes_to_u32be x; pulse_size_fixed parse____UINT32BE x (SZ.uint_to_t 4)
-inline_for_extraction let pulse_size_u64be (x: U64.t) = LS.serializes_to_u64be x; pulse_size_fixed parse____UINT64BE x (SZ.uint_to_t 8)
-inline_for_extraction let pulse_size_u16le (x: U16.t) = LS.serializes_to_u16le x; pulse_size_fixed parse____UINT16 x (SZ.uint_to_t 2)
-inline_for_extraction let pulse_size_u32le (x: U32.t) = LS.serializes_to_u32le x; pulse_size_fixed parse____UINT32 x (SZ.uint_to_t 4)
-inline_for_extraction let pulse_size_u64le (x: U64.t) = LS.serializes_to_u64le x; pulse_size_fixed parse____UINT64 x (SZ.uint_to_t 8)
+inline_for_extraction let pulse_size_u8 (x: U8.t) = LS.serializes_to_u8 x; pulse_size_fixed parse____UINT8 x 1sz
+inline_for_extraction let pulse_size_u16be (x: U16.t) = LS.serializes_to_u16be x; pulse_size_fixed parse____UINT16BE x 2sz
+inline_for_extraction let pulse_size_u32be (x: U32.t) = LS.serializes_to_u32be x; pulse_size_fixed parse____UINT32BE x 4sz
+inline_for_extraction let pulse_size_u64be (x: U64.t) = LS.serializes_to_u64be x; pulse_size_fixed parse____UINT64BE x 8sz
+inline_for_extraction let pulse_size_u16le (x: U16.t) = LS.serializes_to_u16le x; pulse_size_fixed parse____UINT16 x 2sz
+inline_for_extraction let pulse_size_u32le (x: U32.t) = LS.serializes_to_u32le x; pulse_size_fixed parse____UINT32 x 4sz
+inline_for_extraction let pulse_size_u64le (x: U64.t) = LS.serializes_to_u64le x; pulse_size_fixed parse____UINT64 x 8sz

@@ -736,7 +736,8 @@ val pulse_ser_u16le (x: U16.t) : pulse_ser_t parse____UINT16 x emp
 val pulse_ser_u32le (x: U32.t) : pulse_ser_t parse____UINT32 x emp
 val pulse_ser_u64le (x: U64.t) : pulse_ser_t parse____UINT64 x emp
 
-inline_for_extraction noextract val pulse_ser_dep_pair
+noextract [@@noextract_to "krml"] inline_for_extraction
+val pulse_ser_dep_pair
     #nz1 (#k1:parser_kind nz1 WeakKindStrongPrefix) (#t1: Type0) (p1: parser k1 t1)
     #nz2 #wk2 (#k2:parser_kind nz2 wk2) (#t2: t1 -> Type0) (p2: (x: t1) -> parser k2 (t2 x))
     (x1: erased t1) (x2: erased (t2 x1))
@@ -744,7 +745,8 @@ inline_for_extraction noextract val pulse_ser_dep_pair
     (s1: pulse_ser_t p1 x1 frame)
     (s2: pulse_ser_t (p2 x1) x2 frame) :
     pulse_ser_t (parse_dep_pair p1 p2) (| reveal x1, reveal x2 |) frame
-inline_for_extraction noextract val pulse_ser_pair
+noextract [@@noextract_to "krml"] inline_for_extraction
+val pulse_ser_pair
     #nz1 (#k1:parser_kind nz1 WeakKindStrongPrefix) (#t1: Type0) (p1: parser k1 t1)
     #nz2 #wk2 (#k2:parser_kind nz2 wk2) (#t2: Type0) (p2: parser k2 t2)
     (x1: erased t1) (x2: erased t2)
@@ -753,5 +755,5 @@ inline_for_extraction noextract val pulse_ser_pair
     (s2: pulse_ser_t p2 x2 frame) :
     pulse_ser_t (parse_pair p1 p2) (reveal x1, reveal x2) frame
 
-inline_for_extraction noextract
+noextract [@@noextract_to "krml"] inline_for_extraction
 val pulse_ser_ret (#t:Type0) (v:t) : pulse_ser_t (parse_ret v) v emp
