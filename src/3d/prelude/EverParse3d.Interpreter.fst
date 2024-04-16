@@ -511,8 +511,8 @@ let itype_as_pulse_type (i:itype)
     | UInt32BE -> P.___UINT32BE
     | UInt64BE -> P.___UINT64BE
     | Unit -> unit
-    | AllBytes -> admit () // TODO
-    | AllZeros -> admit () // TODO
+    | AllBytes -> P.all_bytes_pulse
+    | AllZeros -> SZ.t
 
 let dtyp_as_pulse_type #nz #wk (#pk:P.parser_kind nz wk) #hr #i #disj #l
                  (d:dtyp pk hr i disj l)
@@ -1174,8 +1174,8 @@ let itype_high_of_pulse (i:itype) (l: itype_as_pulse_type i) : GTot (itype_as_ty
   | UInt16BE -> l
   | UInt32BE -> l
   | UInt64BE -> l
-  | Unit -> ()
-  | AllBytes -> admit ()
+  | Unit -> l
+  | AllBytes -> P.all_bytes_pulse_to_all_bytes l
   | AllZeros -> admit ()
 
 let dtyp_high_of_pulse #nz #wk (#pk:P.parser_kind nz wk) #hr #i #disj #l' (d:dtyp pk hr i disj l')
@@ -1235,9 +1235,14 @@ let rec as_pulse_type #nz #wk (#pk:P.parser_kind nz wk) #l #i #d #b (t:typ pk l 
     admit () // TODO
     // P.cstring (dtyp_as_type elt_t) terminator
 
+let itype_pulse_match_value (i:itype) (h: itype_as_type i) (l: itype_as_pulse_type i) : vprop =
+  match i with
+  | AllBytes -> P.all_bytes_pulse_match h l
+  | _ -> pure (itype_high_of_pulse i l == h)
+
 let dtyp_pulse_match_value #nz #wk (#pk:P.parser_kind nz wk) #hr #i #disj #l' (d:dtyp pk hr i disj l') (h:dtyp_as_type d) (l:dtyp_as_pulse_type d) : Tot vprop =
   match d with
-  | DT_IType i -> pure (itype_high_of_pulse i l == h)
+  | DT_IType i -> itype_pulse_match_value i h l
   | DT_App _ _ _ _ _ b _ -> pulse_ref_match_value (pulse_match_value_of_binding b) h l
 
 let rec pulse_match_value #nz #wk (#pk:P.parser_kind nz wk) #l' #i #d #b (t:typ pk l' i d b) : Tot (as_type t -> as_pulse_type t -> vprop) (decreases t) =
@@ -1262,8 +1267,55 @@ let rec pulse_match_value #nz #wk (#pk:P.parser_kind nz wk) #l' #i #d #b (t:typ 
   | _ -> admit ()
 
 let itype_pulse_serialize_t (i:itype) =
-  x:itype_as_pulse_type i ->
-    P.pulse_ser_t (itype_as_parser i) (itype_high_of_pulse i x) emp
+  l:itype_as_pulse_type i -> h:erased (itype_as_type i) ->
+    P.pulse_ser_t (itype_as_parser i) h (itype_pulse_match_value i h l)
+
+```pulse
+ghost fn unfold_ipmv (i: itype { i <> AllBytes /\ i <> AllZeros }) #h #l
+    requires itype_pulse_match_value i h l
+    returns _:unit
+    ensures pure (itype_high_of_pulse i l == h) {
+  rewrite itype_pulse_match_value i h l as pure (itype_high_of_pulse i l == h);
+}
+```
+
+```pulse
+ghost fn fold_ipmv (i: itype { i <> AllBytes /\ i <> AllZeros }) h l
+    requires pure (itype_high_of_pulse i l == h)
+    returns _:unit
+    ensures itype_pulse_match_value i h l {
+  rewrite pure (itype_high_of_pulse i l == h) as itype_pulse_match_value i h l;
+}
+```
+
+#push-options "--debug EverParse3d.Interpreter --debug_level Rel"
+```pulse
+fn pulse_ser_u8 () : itype_pulse_serialize_t UInt8 = (l: itype_as_pulse_type UInt8) (h: erased (itype_as_type UInt8)) arr j {
+  unfold_ipmv UInt8;
+  let k = P.pulse_ser_u8 l arr j;
+  // fold itype_pulse_match_value UInt8 (reveal h) l;
+  // show_proof_state;
+  fold_ipmv UInt8 h l;
+  k;
+}
+```
+
+// inline_for_extraction
+// ```pulse
+// fn wrap_itype_ser (#i:itype { i <> AllBytes /\ i <> AllZeros }) (s: (l:itype_as_type i) ->
+//       P.pulse_ser_t (itype_as_parser i) l emp)
+//     (l: itype_as_type i) (h: erased (itype_as_type i)) :
+//     P.pulse_ser_t #(parser_kind_nz_of_itype i) #(parser_weak_kind_of_itype i) #(parser_kind_of_itype i) #(itype_as_type i)
+//       (itype_as_parser i) h (pure (itype_high_of_pulse i l == h)) = arr j {
+//   // show_proof_state;
+//     // : itype_pulse_serialize_t i = l h arr j {
+//   admit ();
+//   assert pure (itype_high_of_pulse i l == reveal h);
+//   // s l arr j;
+//   show_proof_state;
+//   admit ();
+// }
+// ```
 
 inline_for_extraction noextract
 let itype_pulse_serialize (i:itype) : itype_pulse_serialize_t i =
@@ -1277,7 +1329,7 @@ let itype_pulse_serialize (i:itype) : itype_pulse_serialize_t i =
   | UInt32BE -> P.pulse_ser_u32be
   | UInt64BE -> P.pulse_ser_u64be
   | Unit -> P.pulse_ser_ret
-  | AllBytes -> admit ()
+  | AllBytes -> admit () // P.pulse_ser_all_bytes
   | AllZeros -> admit ()
 
 

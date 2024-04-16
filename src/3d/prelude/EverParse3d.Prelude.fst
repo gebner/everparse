@@ -601,6 +601,67 @@ fn pulse_ser_ret' (#t:Type0) (v:t)
 noextract [@@noextract_to "krml"] inline_for_extraction
 let pulse_ser_ret (#t:Type0) (v:t) : pulse_ser_t (parse_ret v) v emp = pulse_ser_ret' v
 
+let all_bytes_pulse = len:SZ.t & PA.larray UInt8.t (SZ.v len) & erased (Seq.seq UInt8.t)
+
+let all_bytes_pulse_to_all_bytes (l: all_bytes_pulse) : GTot all_bytes = l._3
+
+let all_bytes_pulse_match (h: all_bytes) l =
+  PA.pts_to l._2 l._3 ** pure (l._3 == hide h)
+
+```pulse 
+fn memcpy_range (#t:eqtype)
+    (src: PA.array t) (i1 j1: SZ.t)
+    (dst: PA.array t) (i2: SZ.t) (j2: erased SZ.t)
+    (#p:perm) (#src0 #dst0:Ghost.erased (Seq.seq t))
+  requires PA.pts_to_range src (SZ.v i1) (SZ.v j1) #p src0
+        ** PA.pts_to_range dst (SZ.v i2) (SZ.v j2) dst0
+        ** pure (SZ.v j1 - SZ.v i1 == SZ.v j2 - SZ.v i2)
+  ensures PA.pts_to_range src (SZ.v i1) (SZ.v j1) #p src0
+       ** PA.pts_to_range dst (SZ.v i2) (SZ.v j2) src0
+{
+  pts_to_range_prop src;
+  pts_to_range_prop dst;
+  let l = SZ.sub j1 i1;
+  let mut i = 0sz;
+  while (let vi = !i; (SZ.v vi < SZ.v l) )
+  invariant b. exists* (vi:SZ.t) (s:Seq.seq t). ( 
+    R.pts_to i vi **
+    PA.pts_to_range src (SZ.v i1) (SZ.v j1) #p src0 **
+    PA.pts_to_range dst (SZ.v i2) (SZ.v j2) s **
+    pure (SZ.v vi <= SZ.v l
+       /\ Seq.length s == SZ.v l
+       /\ (b == (SZ.v vi < SZ.v l))
+       /\ (forall (i:nat). i < SZ.v vi ==> Seq.index src0 i == Seq.index s i)))
+  {
+    let vi = !i;
+    let x = PA.pts_to_range_index src (SZ.add i1 vi);
+    with s. assert (PA.pts_to_range dst (SZ.v i2) (SZ.v j2) s);
+    PA.pts_to_range_upd dst (SZ.add i2 vi) x;
+    i := SZ.add vi 1sz;
+  };
+  with s. assert (PA.pts_to_range dst (SZ.v i2) (SZ.v j2) s);
+  Seq.lemma_eq_elim src0 s;
+  ()
+}
+```
+
+```pulse
+fn pulse_ser_all_bytes' (h: erased all_bytes) (l: all_bytes_pulse) :
+    pulse_ser_t #_ #_ #_ #_ parse_all_bytes h (all_bytes_pulse_match h l) = arr i {
+  unfold all_bytes_pulse_match h l;
+  PA.pts_to_range_intro l._2 _ _;
+  PA.pts_to_range_prop l._2;
+  PA.pts_to_range_prop arr;
+  PA.pts_to_range_split arr (SZ.v i) (SZ.v (SZ.add i l._1)) (PA.length arr);
+  memcpy_range l._2 0sz l._1 arr i (SZ.add i l._1);
+  PA.pts_to_range_elim l._2 _ _;
+  fold all_bytes_pulse_match h l;
+  SZ.add i l._1;
+}
+```
+
+let pulse_ser_all_bytes = pulse_ser_all_bytes'
+
 let pulse_size_t #nz #wk #k #t (p: parser #nz #wk k t) (x: erased (codomain p)) (frame: vprop) =
   stt SZ.t frame (fun j -> frame ** pure (serialized_fits p x (SZ.v j)))
 

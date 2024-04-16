@@ -717,6 +717,7 @@ let serialized_fits #nz #wk (#k: parser_kind nz wk) #t (p: parser k t) (x: t) (s
   in_codomain p x /\ Seq.length (serialize p x) <= sz
 
 let pulse_ser_t #nz #wk #k (#t:Type0) (p: parser #nz #wk k t) (x: erased t) (frame: vprop) : Type0 =
+
   arr: PA.array FStar.UInt8.t {SZ.fits (PA.length arr)} ->
   i: SZ.t { SZ.v i <= PA.length arr /\ serialized_fits p x (PA.length arr - SZ.v i) } ->
   stt SZ.t
@@ -757,3 +758,9 @@ val pulse_ser_pair
 
 noextract [@@noextract_to "krml"] inline_for_extraction
 val pulse_ser_ret (#t:Type0) (v:t) : pulse_ser_t (parse_ret v) v emp
+
+val all_bytes_pulse : Type0
+val all_bytes_pulse_to_all_bytes : all_bytes_pulse -> GTot all_bytes
+val all_bytes_pulse_match : all_bytes -> all_bytes_pulse -> vprop
+val pulse_ser_all_bytes (h: erased all_bytes) (l: all_bytes_pulse) :
+  pulse_ser_t parse_all_bytes h (all_bytes_pulse_match h l)
