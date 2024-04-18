@@ -17,14 +17,15 @@ endif
 KRML_HOME?=$(realpath ../../../../../karamel)
 OTHERFLAGS?=
 
-FSTAR_OPTIONS=$(addprefix --include , .. $(EVERPARSE_HOME)/src/lowparse $(KRML_HOME)/krmllib $(KRML_HOME)/krmllib/obj) --z3rlimit_factor 8 --max_fuel 0 --max_ifuel 2 --initial_ifuel 2 --z3cliopt 'smt.qi.eager_threshold=100'
+FSTAR_OPTIONS=$(addprefix --include , .. $(EVERPARSE_HOME)/src/lowparse $(KRML_HOME)/krmllib $(KRML_HOME)/krmllib/obj $(PULSE_HOME)/lib/pulse $(PULSE_HOME)/lib/pulse/core $(PULSE_HOME)/lib/pulse/lib) \
+	--z3rlimit_factor 8 --max_fuel 0 --max_ifuel 2 --initial_ifuel 2 --z3cliopt 'smt.qi.eager_threshold=100' --load_cmxs pulse
 FSTAR=$(FSTAR_HOME)/bin/fstar.exe $(FSTAR_OPTIONS) $(OTHERFLAGS) --cmi
 
 ROOT=$(wildcard *.fst) $(wildcard *.fsti)
 ALREADY_CACHED=--already_cached '*,-EverParse3d.Actions.All,-EverParse3d.InputStream.All,-EverParse3d.InputStream.Extern,-EverParse3d.Actions.BackendFlag,-EverParse3d.Actions.BackendFlagValue'
 
 .depend: $(ROOT)
-	$(FSTAR) --dep full $(ROOT) $(ALREADY_CACHED) --extract 'krml:*,-Prims,-FStar.Tactics' > $@.tmp
+	$(FSTAR) --dep full $(ROOT) $(ALREADY_CACHED) --extract 'krml:*,-Prims,-FStar.Tactics,-PulseCore,-Pulse' > $@.tmp
 	mv $@.tmp $@
 
 -include .depend

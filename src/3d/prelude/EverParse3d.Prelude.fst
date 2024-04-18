@@ -644,7 +644,6 @@ fn memcpy_range (#t:eqtype)
   ()
 }
 ```
-
 ```pulse
 fn pulse_ser_all_bytes' (h: erased all_bytes) (l: all_bytes_pulse) :
     pulse_ser_t #_ #_ #_ #_ parse_all_bytes h (all_bytes_pulse_match h l) = arr i {
@@ -662,10 +661,25 @@ fn pulse_ser_all_bytes' (h: erased all_bytes) (l: all_bytes_pulse) :
 
 let pulse_ser_all_bytes = pulse_ser_all_bytes'
 
-let pulse_size_t #nz #wk #k #t (p: parser #nz #wk k t) (x: erased (codomain p)) (frame: vprop) =
+let rec all_zeros_pulse_to_all_zeros sz : GTot all_zeros (decreases SZ.v sz) =
+  match SZ.v sz with
+  | 0 -> []
+  | _ -> 0uy :: all_zeros_pulse_to_all_zeros (SZ.sub sz 1sz)
+
+```pulse
+fn pulse_ser_all_zeros' (h: erased all_zeros) (l: SizeT.t) :
+    pulse_ser_t #_ #_ #_ #_ parse_all_zeros h (pure (all_zeros_pulse_to_all_zeros l == reveal h)) = arr i {
+  admit ();
+}
+```
+
+let pulse_ser_all_zeros h l = pulse_ser_all_zeros' h l
+
+inline_for_extraction
+let pulse_size_t #nz #wk #k (#t:Type0) (p: parser #nz #wk k t) (x: erased (codomain p)) (frame: vprop) =
   stt SZ.t frame (fun j -> frame ** pure (serialized_fits p x (SZ.v j)))
 
-noextract [@@noextract_to "krml"] inline_for_extraction
+// inline_for_extraction // TODO: breaks extraction
 ```pulse
 fn pulse_size_fixed' #nz #wk #k (#t:Type0) (p: parser #nz #wk k t) (x: erased (codomain p)) (sz: SZ.t {serialized_fits p x (SZ.v sz)})
   requires emp
@@ -676,9 +690,9 @@ fn pulse_size_fixed' #nz #wk #k (#t:Type0) (p: parser #nz #wk k t) (x: erased (c
 }
 ```
 
-noextract [@@noextract_to "krml"] inline_for_extraction
-let pulse_size_fixed #nz #wk #k #t (p: parser #nz #wk k t) (x: erased (codomain p)) (sz: SZ.t {serialized_fits p x (SZ.v sz)}) :
-    pulse_size_t p x emp =
+inline_for_extraction
+let pulse_size_fixed #nz #wk #k (#t:Type0) (p: parser #nz #wk k t) (x: erased (codomain p))
+    (sz: SZ.t {serialized_fits p x (SZ.v sz)}) : pulse_size_t #nz #wk #k #t p x emp =
   pulse_size_fixed' p x sz
 
 inline_for_extraction let pulse_size_u8 (x: U8.t) = LS.serializes_to_u8 x; pulse_size_fixed parse____UINT8 x 1sz
