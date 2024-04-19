@@ -6,9 +6,13 @@ let fstar_home = OS.getenv "FSTAR_HOME"
 let krml_home = OS.getenv "KRML_HOME"
 let krmllib = filename_concat krml_home "krmllib"
 let everparse_home = OS.getenv "EVERPARSE_HOME"
+let pulse_home = OS.getenv "PULSE_HOME"
 let lowparse_home = filename_concat (filename_concat everparse_home "src") "lowparse"
 let ddd_home = filename_concat (filename_concat everparse_home "src") "3d"
 let ddd_prelude_home = filename_concat (filename_concat (filename_concat everparse_home "src") "3d") "prelude"
+let pulse1_home = filename_concat (filename_concat pulse_home "lib") "pulse"
+let pulse_core_home = filename_concat pulse1_home "core"
+let pulse_lib_home = filename_concat pulse1_home "lib"
 
 let ddd_actions_home input_stream_binding =
   let input_stream_dir =
@@ -67,6 +71,9 @@ let fstar_args0 =
       "--include" :: krmllib ::
         "--include" :: (filename_concat krmllib "obj") ::
           "--include" :: ddd_prelude_home ::
+          "--include" :: pulse1_home ::
+          "--include" :: pulse_core_home ::
+          "--include" :: pulse_lib_home ::
             "--cmi" ::
             "--warn_error" :: "+241" ::
               OS.getenv_array "EVERPARSE_FSTAR_OPTIONS"
